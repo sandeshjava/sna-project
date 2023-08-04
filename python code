@@ -1,0 +1,240 @@
+import time
+import networkx as nx
+from collections import deque
+import numpy as np
+import math
+import matplotlib.pyplot as plt
+import sys
+import csv
+import random
+
+from queue import Queue
+def independent_cascade_model(G, seeds, p):
+    # Initialize node states
+    activated_nodes = set()
+    q = Queue()
+    q.put(seeds)
+    time = {seeds:0}
+    activated_nodes.add(seeds)
+    # While there are nodes to process
+    while not q.empty():
+        node = q.get()
+
+        
+        # Activate neighbors
+        for neighbor in G[node]:
+            # Check if the neighbor has already been activated or is already in the queue
+            if neighbor in activated_nodes:
+                continue
+            
+            # Check if the edge has already been activated
+            # Activate the neighbor with probability p
+            if np.random.random() < p:
+                activated_nodes.add(neighbor)
+                time[neighbor]=time[node]+1
+                q.put(neighbor)
+                
+    return time
+
+
+def possible_shortest_path(source, target, graph, tree, partial_time_stamp):
+    """
+    Finds the shortest path between source and target nodes in graph
+    that does not pass through any nodes in tree or partial_time_stamp,
+    except for the source and target nodes.
+    """
+    visited = set()
+    dist = {source: 0}
+    parent = {source: None}
+    q = Queue()
+    q.put(source)
+    while not q.empty():
+        node = q.get()
+        if node == target:
+            path = []
+            while node is not None:
+                path.append(node)
+                node = parent[node]
+            path.reverse()
+            return len(path) - 1, path
+        for neighbor in graph[node]:
+            if neighbor in visited or neighbor in tree:
+                continue
+            if neighbor == target:
+                visited.add(neighbor)
+                dist[neighbor] = dist[node] + 1
+                parent[neighbor] = node
+                q.put(neighbor)
+            if neighbor in partial_time_stamp:
+                continue
+            visited.add(neighbor)
+            dist[neighbor] = dist[node] + 1
+            parent[neighbor] = node
+            q.put(neighbor)
+    return -1, []
+
+
+def infection_tree(graph, partial_time_stamp, vt):
+    # Step 1
+    mu = 0.0
+    nume = 0.0
+    deno = 0.0
+    for u in partial_time_stamp:
+        for v in partial_time_stamp:
+            if u != v:
+                nume += abs(partial_time_stamp[u] - partial_time_stamp[v])
+                deno += nx.shortest_path_length(graph, u, v)
+    mu = nume / deno
+    
+    # Step 2
+    partial_time_stamp_sorted = sorted(partial_time_stamp.items(), key=lambda x: x[1])
+    
+    # Step 3
+    tree = nx.DiGraph()
+    tree.add_node(vt)
+    
+    # Step 4
+    tree_cost = 0.0
+    
+    # Step 5
+    time = {}
+    
+    # Step 6
+    if vt == partial_time_stamp_sorted[0][0]:
+        time[vt] = partial_time_stamp[vt]
+    else:
+        first_node = partial_time_stamp_sorted[0][0]
+        time[vt] = (partial_time_stamp_sorted[0][1] - mu) / nx.shortest_path_length(graph, vt, first_node)
+
+    # Step 7
+    check = 1
+    for u, u_infection_time in partial_time_stamp_sorted[0:]:
+        if check == 1 and u == vt:
+            check += 1
+            continue
+        if u == vt:
+            return -1,tree
+        p = sys.float_info.max
+        m_star = None
+        m_shortest_path = []
+        paath_length = -1
+        for m in tree.nodes:
+            path_length, shortest_path = possible_shortest_path(m, u, graph, tree, partial_time_stamp)
+            if path_length == -1:
+                continue
+            pt = path_length * ((((u_infection_time - time[m]) / path_length) - mu) ** 2)
+            if pt < p:
+                p = pt
+                paath_length = path_length
+                m_shortest_path = shortest_path
+                m_star = m
+        if check != 1:
+            tree_cost += p
+        if paath_length == -1:
+            return -1,tree
+        hg = 1
+        check += 1
+        parent = m_star
+        for v in m_shortest_path[1:]:
+            tree.add_node(v)
+            tree.add_edge(parent, v)
+            time[v] = time[m_star] + (hg * ((u_infection_time - time[m_star]) / paath_length))
+            hg += 1
+            parent = v
+    
+    # Step 8
+    q = Queue()
+    for node in tree:
+        q.put(node)
+    while not q.empty():
+        qt = q.get()
+        for re in graph[qt]:
+            if re in tree:
+                continue
+            tree.add_node(re)
+            tree.add_edge(qt, re)
+            time[re] = time[qt] + mu
+            q.put(re)
+    
+    # Step 9
+    return tree_cost, tree
+
+def main():
+    # Example graph
+    # graph = nx.karate_club_graph()
+    graph = nx.Graph()
+    
+    with open("football.csv", mode ='r')as file:
+        csvFile = csv.DictReader(file)
+        for line in csvFile:
+            graph.add_edge(int(line['Source'])-1,int(line['Target'])-1)
+    num_nodes = graph.number_of_nodes()
+
+
+    # graph.add_edges_from([(1, 2), (1, 5), (2, 1), (3, 6), (4, 5), (4, 6), (4, 7), (5, 1), (5, 4), (5, 8), (6, 3), (6, 4), (6, 7), (6, 10), (7, 4), (7, 6), (7, 8), (7, 9), (8, 5), (8, 7), (8, 11), (8, 12), (9, 7), (9, 13), (10, 6), (10, 13), (11, 8), (11, 13), (12, 8), (12, 15), (13, 9), (13, 10), (13, 11), (14, 15), (15, 12), (15, 14)])
+    
+    # Example partial_time_stamp dictionary
+    # partial_time_stamp = {2805: 585.0,2670: 365.0,3401: 485.0,2775: 490.0}
+    observer_percentage = {0:0.05,1:0.1,2:0.15,3:0.2}
+    print("for observer percentage",observer_percentage[0]*100)
+    start = time.time()
+    # dis = 0
+    total_number_observers = observer_percentage[0]*num_nodes
+    print("total number of observers",total_number_observers)
+    for iteration in range (0,1):
+        seed = random.choice(list(graph.nodes()))
+        ans_t=independent_cascade_model(graph, seed, 0.9)
+        # print(ans_t)
+        # for i in graph:
+        #     if i not in ans_t:
+        #         ans_t[i]=1000
+        # partial_time_stamp = {1: ans_t[1],6: ans_t[6],8: ans_t[8],13: ans_t[13]}
+        partial_time_stamp = {}
+        observer = 1
+        while observer <= total_number_observers:
+            node = random.choice(list(graph.nodes()))
+            if node in ans_t and node not in partial_time_stamp:
+                partial_time_stamp[node] = ans_t[node]
+                observer += 1
+        # print("partial_time_stamp",partial_time_stamp)
+
+
+        # creat a vector which store cost for every node
+        cost = {}
+        
+        for vt in graph:
+            # Call infection_tree function
+            tree_cost, tree = infection_tree(graph, partial_time_stamp, vt)
+            if tree_cost == -1:
+                cost[vt] = sys.float_info.max
+            else:
+                cost[vt] = tree_cost
+        
+        # Print results
+        cost_sorted = sorted(cost.items(), key=lambda x: x[1])
+        # for node,cost in cost_sorted[0:]:
+        #     print("cost of",node,cost)
+        # dis += nx.shortest_path_length(graph, seed, cost_sorted[0][0])
+        print("The most susceptible node is",cost_sorted[0][0],"with cost",cost_sorted[0][1])
+        print("The error between source and seed is",nx.shortest_path_length(graph, seed, cost_sorted[0][0]))
+        end = time.time()
+        print("total execution time is",(end-start))
+        # print("dis",dis)
+    color_map = []
+    for node in graph:
+        if node == cost_sorted[0][0]:
+            color_map.append('red')
+        elif node == seed:
+            color_map.append('yellow')
+        elif node in partial_time_stamp:
+            color_map.append('green')
+        else: 
+            color_map.append('blue')
+    
+    
+    
+    nx.draw(graph, node_color=color_map, with_labels=True)
+    plt.show()
+
+if __name__ == '__main__':
+    main()
